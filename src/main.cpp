@@ -15,34 +15,44 @@
 #define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+//Variables de debug
+long lastLoopTime = 0;
+long loopRate = 0;
+
+//Pin donde está conectada la señal del sensor Hall
 const int pinHall = A0;
 //Definimos el tiempo mínimo de refresco de la pantalla en ms. Si reducimos mucho esto podemos provocar que perdamos alguna lectura.
 //Podemos dejar un valor tan grande como queramos ya que cuando cambie la vuelta se invocará un refresco 
 const int frameRefreshTime = 1000;
 long lastFrameMillis = 0;
-//Esta variable la debe inicializar el método calibrarHall
+//Media de la medida. Se tomará el valor de esta variable como el normal 
 float med = 0;
+
 float lastMed = 0;
-//Error de la magnitud aceptada sin contar vuelta
+//Error de la magnitud del sensor Hall aceptada 
 const float err = 5;
-long lastLoopTime = 0;
-long loopRate = 0;
+
 long numVueltas = 0;
 //Almacena las últimas vueltas mostradas por pantalla
 long numVueltasPrinted = 0;
+
 void calibrarHall();
 float getMedidaSensorHall();
 void conteoDeVuelta();
 void refreshOLED();
-
+void calculaLoopRate();
 
 void setup() {
+  //Iniciamos el pin del sensor Hall
   pinMode(pinHall, INPUT);
+
   Serial.begin(115200);
-  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
+  //Iniciamos la conexión con la pantalla OLED
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Dirección 0x3C para mi OLED 128x64
     Serial.println(F("SSD1306 allocation failed"));
     for(;;); // Don't proceed, loop forever
   }
+  //Mostramos información y calibramos el sensor
   display.setTextColor(WHITE, BLACK);
   display.fillScreen(BLACK);
   display.setCursor(0, 10);
@@ -57,6 +67,14 @@ void setup() {
   display.display();
 }
 
+void loop() {
+  calculaLoopRate();
+  conteoDeVuelta();
+  refreshOLED();
+}
+
+
+//Función de debug que calcula el número de iteraciones de loop por segundo 
 void calculaLoopRate(){
   long now = millis();
   if(lastLoopTime>0){
@@ -65,11 +83,7 @@ void calculaLoopRate(){
   lastLoopTime=now;
 }
 
-void loop() {
-  calculaLoopRate();
-  conteoDeVuelta();
-  refreshOLED();
-}
+
 
 //Establece la media con medidas sucesivas
 void calibrarHall(){
@@ -82,10 +96,12 @@ void calibrarHall(){
   med = media/iter;
 }
 
-
+//Funcion que toma la medida del sensor de efecto Hall y determina si debe incrementar las vueltas o no.
+//Mientras el imán está pasando cerca del sensor esta función queda bloqueada hasta obtener un valor normal 
 void conteoDeVuelta(){
   long medida = getMedidaSensorHall();
   //Dependiendo de cómo coloquemos el imán (polo N o polo S), la fuerza magnética medida por el sensor será positiva o negativa con respecto a la media
+  //Acercamos norte
   if(medida < med-err){
     while(medida < med-err){
       medida = getMedidaSensorHall();
@@ -93,6 +109,7 @@ void conteoDeVuelta(){
     }
     numVueltas++;
   }
+  //Acercamos sur
   if(medida > med+err){
     while(medida > med+err){
       medida = getMedidaSensorHall();
@@ -102,6 +119,7 @@ void conteoDeVuelta(){
   }
 }
 
+//Obtiene la media del sensor de efecto Hall filtrando el ruido 
 float getMedidaSensorHall(){
    //media de 10 medidas para filtrar ruido
   float measure = 0;
@@ -110,6 +128,8 @@ float getMedidaSensorHall(){
   }
   measure /= 10.0f;
   lastMed=measure;
+  //si la medida obtenida está dentro de lo aceptable, incluimos la medida ponderada al 1% para evitar 
+  //que desviaciones progresivas del valor obtenido nos saquen constantemente de la media
   if(abs(measure - med)<err){
     med = (99.0f*med + measure)/100.0f;
   }
@@ -119,6 +139,7 @@ float getMedidaSensorHall(){
   return measure;
 }
 
+//Pinta en la pantalla los datos de las vueltas (y de debug)
 void refreshOLED(){
   long now = millis();
   if((lastFrameMillis+frameRefreshTime<now)
@@ -130,7 +151,6 @@ void refreshOLED(){
     display.setCursor(0, 34);
     display.setFont(&FreeSans24pt7b);
     display.print(numVueltas);
-    // display.setFont(&FreeSans12pt7b);
     display.setFont(&Picopixel);
     display.setCursor(0,63);
     display.print(med);
